@@ -2,12 +2,16 @@
 Hand the BlueZ Bluetooth Management (mgmt) API
 """
 import abc
+import traceback
 from collections import namedtuple
 from enum import Enum
 import sys
 from btsocket import tools
+import logging
 
 logger = tools.create_module_logger(__name__)
+logger.setLevel(logging.ERROR)
+
 current_module = sys.modules[__name__]
 
 Parameter = namedtuple('Parameter',
@@ -194,7 +198,12 @@ class EIRData(DataField):
             data_type = data[pointer + 1]
             data_start = pointer + 2
             data_end = data_start + len_data - 1
-            self.value[ADType(data_type)] = data[data_start:data_end]
+            try:
+                self.value[ADType(data_type)] = data[data_start:data_end]
+            except ValueError as ex:
+                raise ValueError(f"EIRData.decode: Invalid ADType, data len: {len(data)}, data: {data[pointer:].hex(' ')}") \
+                    from ex
+
             pointer += data[pointer] + 1
 
     def encode(self, value, width):
@@ -235,8 +244,13 @@ class Packet:
             for index in range(repeated):
                 class_ = getattr(current_module, param.bt_type)
                 data_type = class_()
-                data_type.decode(pkt[pointer:pointer + param.width])
-                self._add_to_value(param, data_type.value)
+                try:
+                    data_type.decode(pkt[pointer:pointer + param.width])
+                    self._add_to_value(param, data_type.value)
+                except ValueError as ex:
+                    logger.error('Decoding %s as type %s', param.name, param.bt_type)
+                    logger.error(f"Packet.decode: failed to decode {param.name} as {param.bt_type}. Offset: {pointer}, width: {param.width}, pkt: {pkt.hex(' ')}. Error: {ex}")
+                    traceback.print_exc()
                 pointer += param.width
         if pointer < len(pkt):
             # self.value['parameters'] = pkt[pointer:]
