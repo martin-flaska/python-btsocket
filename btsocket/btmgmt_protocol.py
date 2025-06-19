@@ -19,6 +19,7 @@ Response = namedtuple('Response',
 Command = namedtuple('Command', ('header', 'cmd_params_frame'),
                      defaults=(None,))
 
+log_frame = False
 
 class DataField(metaclass=abc.ABCMeta):
     def __init__(self):
@@ -197,6 +198,8 @@ class EIRData(DataField):
             try:
                 self.value[ADType(data_type)] = data[data_start:data_end]
             except ValueError as ex:
+                global log_frame
+                log_frame = True
                 raise ValueError(f"EIRData.decode: Invalid ADType: 0x{data_type:02x}, "
                                  f"data len: {len(data)}, data: {data[pointer:].hex(' ')}") from ex
             pointer += data[pointer] + 1
@@ -243,6 +246,8 @@ class Packet:
                     data_type.decode(pkt[pointer:pointer + param.width])
                     self._add_to_value(param, data_type.value)
                 except ValueError as ex:
+                    global log_frame
+                    log_frame = True
                     logger.error(
                         f"Packet.decode: failed to decode {param.name} as {param.bt_type}. "
                         f"Offset: {pointer}, width: {param.width}, pkt: {pkt.hex(' ')}. Error: {ex}"
@@ -1063,13 +1068,18 @@ def reader(pckt):
     event_frame = events.get(header.event_code.value)
 
     cmd_params = event_frame.decode(evt_params)
+    global log_frame
     if cmd_params:
         cmd_response_frame = cmd_response.get(event_frame.command_opcode.value)
         cmd_response_frame.decode(cmd_params)
-        logger.debug('Socket Read: %s %s %s',
-                     header, event_frame, cmd_response_frame)
+        if log_frame:
+            logger.error('Socket Read: %s %s %s',
+                        header, event_frame, cmd_response_frame)
+            log_frame = False
         return Response(header, event_frame, cmd_response_frame)
-    logger.debug('Socket read %s %s', header, event_frame)
+    if log_frame:
+        logger.error('--Socket read %s %s', header, event_frame)
+        log_frame = False
     return Response(header, event_frame)
 
 
